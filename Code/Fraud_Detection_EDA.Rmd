@@ -1,0 +1,549 @@
+---
+title: "Fraud_Detection"
+output: html_document
+---
+
+```{r}
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+library(ggridges)
+library(readr) #For reaading CSV Files
+library(purrr)
+library(corrplot)
+library(caTools)
+library(caret)
+library(randomForest) #Used for Random Forest
+library(ROSE)
+library(rpart) #Used for Decision Tree
+library(rpart.plot)
+library(smotefamily) #Used for SMOTE
+library(tidyverse) # metapackage with lots of helpful functions
+library(pROC) # to use with AUC
+library(RColorBrewer)#used for chart
+library(e1071)
+library(scales) #used for chart
+```
+
+
+
+```{r}
+credit_card=read.csv("creditcard.csv")
+```
+
+
+```{r}
+nrow(credit_card)
+str(credit_card)
+credit_card$Class = factor(credit_card$Class,levels=c(0,1))
+summary(credit_card)
+sum(is.na(credit_card))
+```
+
+
+
+```{r}
+#Get distribution of different classes
+table(credit_card$Class)
+
+#Percentage
+prop.table(table(credit_card$Class))
+
+#Pie Chart of credit card transaction
+labels = c("legit","fraud")
+labels = paste(labels,round(100*prop.table(table(credit_card$Class)),2))
+labels = paste0(labels,"%")
+labels
+
+
+pie(table(credit_card$Class) , labels  , col = c("orange","red"), main = " Pie Chart for transactions ")
+
+```
+
+
+
+```{r}
+
+ggplot(credit_card,aes(x=Class))+
+  geom_bar(position ="dodge",fill="blue")+
+  scale_y_continuous()+
+  scale_x_discrete()+
+  ggtitle("Distribution of Calss Variable")
+```
+
+
+```{r}
+
+ggplot(credit_card,aes(x=Class, y=Amount,group=Class))+
+  geom_boxplot()+
+  ggtitle("Amount by Class")
+```
+
+
+
+```{r}
+
+data_h<- gather(credit_card,type,value,2:29) #Pivot_longer
+head(data_h)
+
+data_h <- data_h%>% select(Time,type,value,Amount,Class)
+data_h = sample_n(data_h,4000)
+nrow(data_h)
+
+ggplot(data_h, aes(x=value,y = Amount, color=type))+
+  geom_jitter()+
+  facet_grid(.~Class)+
+  ggtitle("Distribution of Normal and Fraud Class")
+
+head(data_h)
+
+
+ggplot(data=data_h) + geom_bar(mapping = aes(x=type,fill=Class)) + theme(axis.text.x = element_text(angle = 90,hjust=1,vjust=0.5))
+
+
+```
+
+
+## No Model Prediction
+
+```{r}
+
+class(credit_card$Class)
+pred = rep.int(0,nrow(credit_card))
+
+pred = factor(pred,levels=c(0,1))
+confusionMatrix(data = pred , reference = credit_card$Class)
+
+```
+
+
+
+## Taking a part of dataset(40%)
+
+```{r}
+
+set.seed(1)
+credit_card = credit_card %>% sample_frac(0.4)
+
+class(credit_card$Class)
+
+ggplot(data = credit_card,aes(x=V1,y=V2,col=Class))+geom_point()+theme_bw()+scale_color_manual(values = c('dodgerblue2','red'))
+
+
+```
+
+
+## Create train and test set
+
+```{r}
+
+set.seed(123)
+
+data_sample = sample.split(credit_card$Class,SplitRatio = 0.80)
+train_data = subset(credit_card,data_sample==TRUE)
+test_data = subset(credit_card,data_sample==FALSE)
+nrow(train_data)
+nrow(test_data)
+
+
+```
+
+
+
+## Balaning Data
+
+* Random Over Sampling
+
+```{r}
+
+
+
+table(train_data$Class)
+
+n_legit = 90978   
+new_frac_legit = 0.50
+new_n_total = n_legit / new_frac_legit
+new_n_total
+
+over_sampling = ovun.sample(Class ~ . ,
+                            data = train_data,
+                            method = "over",
+                            N = new_n_total,
+                            seed=2019)
+
+oversampled_credit = over_sampling$data
+
+table(oversampled_credit$Class)
+
+ggplot(data = oversampled_credit,aes(x=V1,y=V2,col=Class))+
+  geom_point()+
+  theme_bw()+
+  scale_color_manual(values = c('dodgerblue2','red'))
+
+
+
+ggplot(data = oversampled_credit,aes(x=V1,y=V2,col=Class))+
+  geom_point(position = position_jitter(width=0.2))+
+  theme_bw()+
+  scale_color_manual(values = c('dodgerblue2','red'))
+
+
+
+```
+
+
+* Random Ubder Sampling
+
+```{r}
+
+table(train_data$Class)
+
+n_fraud = 161
+new_frac_fraud = 0.50
+new_n_total = n_fraud / new_frac_fraud
+
+under_sampling = ovun.sample(Class ~ . ,
+                            data = train_data,
+                            method = "under",
+                            N = new_n_total,
+                            seed=2019)
+undersampled_credit = under_sampling$data
+table(undersampled_credit$Class)
+
+ggplot(data = undersampled_credit,aes(x=V1,y=V2,col=Class))+
+  geom_point()+
+  theme_bw()+
+  scale_color_manual(values = c('dodgerblue2','red'))
+
+
+```
+
+* Both RUS , ROS
+
+```{r}
+
+
+n_new = nrow(train_data)
+fraction_fraud_new = 0.50
+
+sampling_reult = ovun.sample(Class ~ . ,
+                             data = train_data,
+                             method = "both",
+                             N = n_new,
+                             p = fraction_fraud_new,
+                             seed=2019)
+
+sampled_credit = sampling_reult$data
+table(sampled_credit$Class)
+
+ggplot(data = sampled_credit,aes(x=V1,y=V2,col=Class))+
+  geom_point(position = position_jitter(width=0.2))+
+  theme_bw()+
+  scale_color_manual(values = c('dodgerblue2','red'))
+```
+
+
+
+## SMOTE Preprocessing - Synthetic Minority Over-sampling Technique
+
+
+```{r}
+
+
+#install.packages("smotefamily")
+
+nrow(train_data)
+table(train_data$Class)
+n0 = 90978
+n1= 161
+r0 = 0.6
+
+ntimes = ((1-r0) / r0) * (n0/n1) - 1 #432 times
+#head(train_data)
+#head(train_data[,-c(1,31)])
+smote_output = SMOTE(X = train_data[,-c(1,31)],
+                     target = train_data$Class,
+                     K=5, #K is the number of nearest neighbours
+                     dup_size = ntimes)
+
+credit_smote = smote_output$data
+table(credit_smote$Class)
+nrow(credit_smote)
+#changing class to Class
+
+table(credit_smote$Class)
+head(credit_smote)
+names(credit_smote)[names(credit_smote) == "class"] <- "Class"
+credit_smote$Class = as.factor(credit_smote$Class)
+class(credit_smote$Class)
+
+prop.table(table(credit_smote$Class))
+
+
+```
+
+
+
+
+```{r}
+
+#Class distribution for original dataset
+
+ggplot(train_data,aes(x=V1,y=V2,col=Class))+
+  geom_point()+
+  theme_bw()+
+  scale_color_manual(values = c('dodgerblue2','red'))
+
+
+ggplot(credit_smote,aes(x=V1,y=V2,col=Class))+
+  geom_point()+
+  theme_bw()+
+  scale_color_manual(values = c('dodgerblue2','red'))
+```
+
+
+##### Decision Tree
+
+
+```{r}
+
+table(credit_smote$Class)
+
+#Trees
+
+head(credit_smote)
+
+CART_model = rpart(Class ~ . ,credit_smote)
+rpart.plot(CART_model,extra = 0,type=5,tweak=1.2)
+predicted_val = predict(CART_model,test_data,type='class')
+df = confusionMatrix(predicted_val,test_data$Class)
+df$table
+df
+fourfoldplot(df$table)
+
+precision <- df$byClass['Precision']    
+precision
+recall <- df$byClass['Recall']
+recall
+specificity<- df$byClass['Specificity']
+specificity
+F_Score = (2 * precision * recall) / (precision + recall)
+paste("F-score",F_Score)
+(F_Score)
+paste(precision,recall,specificity)
+
+
+```
+
+
+
+
+#### Decision tree on original data
+
+```{r}
+
+CART_model = rpart(Class ~ . ,train_data[,-1])
+rpart.plot(CART_model,extra = 0,type=5,tweak=1.2)
+
+predicted_val = predict(CART_model,test_data[-1],type='class')
+df = confusionMatrix(predicted_val,test_data$Class)
+
+precision <- df$byClass['Precision']    
+precision
+recall <- df$byClass['Recall']
+recall
+specificity<- df$byClass['Specificity']
+specificity
+F_Score = (2 * precision * recall) / (precision + recall)
+paste("F-Score",F_Score)
+
+df
+
+```
+
+
+### Using our trained smote model on whole data(unbalanced)
+
+
+```{r}
+
+
+CART_model = rpart(Class ~ . ,credit_smote)
+
+predicted_val = predict(CART_model,credit_card[-1],type='class')
+df = confusionMatrix(predicted_val,credit_card$Class)
+df
+df$table
+
+precision <- df$byClass['Precision']    
+precision
+recall <- df$byClass['Recall']
+recall
+specificity<- df$byClass['Specificity']
+specificity
+F_Score = (2 * precision * recall) / (precision + recall)
+paste("F-Score",F_Score)
+
+```
+
+
+
+* Decision Tree without SMOTE
+
+```{r}
+#Using trained model and tesing it
+
+CART_model = rpart(Class ~ . ,train_data[,-1])
+
+predicted_val = predict(CART_model,credit_card[-1],type='class')
+df = confusionMatrix(predicted_val,credit_card$Class)
+nrow(credit_smote)
+df
+
+precision <- df$byClass['Precision']    
+precision
+recall <- df$byClass['Recall']
+recall
+specificity<- df$byClass['Specificity']
+specificity
+F_Score = (2 * precision * recall) / (precision + recall)
+paste("F-Score",F_Score)
+
+```
+
+
+
+
+
+```{r}
+# Random Forest with SMOTE
+set.seed(1)
+credit_smote = credit_smote %>% sample_frac(0.5)
+nrow(credit_smote)
+model_rfn <-  randomForest(Class~., data = credit_smote,
+                           ntree = 1000, nodesize = 20)
+#testing sample trained model on test data
+predict_rfn <- predict(model_rfn, test_data, type = "response")
+df = confusionMatrix(predict_rfn, test_data[["Class"]])
+df
+
+precision <- df$byClass['Precision']    
+precision
+recall <- df$byClass['Recall']
+recall
+specificity<- df$byClass['Specificity']
+specificity
+F_Score = (2 * precision * recall) / (precision + recall)
+paste("F-Score",F_Score)
+
+#importance(model_rfn
+
+options(repr.plot.width=5, repr.plot.height=4)
+varImpPlot(model_rfn,
+          sort = T,
+           n.var=10,
+           main="Top 10 Most Important Variables")
+```
+
+
+### Checking for out of bag error
+
+```{r}
+# Random Forest with SMOTE
+model_rfn200 <-  randomForest(Class~., data = credit_smote,
+                           ntree = 200, nodesize = 20)
+#testing sample trained model on test data
+predict_rfn <- predict(model_rfn200, test_data, type = "response")
+df = confusionMatrix(predict_rfn, test_data[["Class"]])
+df
+
+precision <- df$byClass['Precision']    
+precision
+recall <- df$byClass['Recall']
+recall
+specificity<- df$byClass['Specificity']
+specificity
+F_Score = (2 * precision * recall) / (precision + recall)
+paste("F-Score",F_Score)
+
+```
+
+
+
+```{r}
+# Random Forest with SMOTE
+model_rfn400 <-  randomForest(Class~., data = credit_smote,
+                           ntree = 400, nodesize = 20)
+#testing sample trained model on test data
+predict_rfn <- predict(model_rfn400, test_data, type = "response")
+df = confusionMatrix(predict_rfn, test_data[["Class"]])
+df
+
+precision <- df$byClass['Precision']    
+precision
+recall <- df$byClass['Recall']
+recall
+specificity<- df$byClass['Specificity']
+specificity
+F_Score = (2 * precision * recall) / (precision + recall)
+paste("F-Score",F_Score)
+
+
+```
+
+
+
+
+```{r}
+# Random Forest with SMOTE
+#model_rfn
+#set.seed(1)
+#credit_smote = credit_smote %>% sample_frac(0.5)
+nrow(credit_smote)
+model_rfn3 <-  randomForest(Class~V14+V4, data = credit_smote)
+#testing sample trained model on test data
+predict_rfn4 <- predict(model_rfn3, test_data, type = "response")
+confusionMatrix(predict_rfn4, test_data[["Class"]])
+
+```
+
+
+
+```{r}
+# Random Forest with SMOTE
+#model_rfn
+#set.seed(1)
+#credit_smote = credit_smote %>% sample_frac(0.5)
+nrow(credit_smote)
+model_rfn4 <-  randomForest(Class~V14+V4+V10+V12+V11, ntree=200, data = credit_smote)
+#testing sample trained model on test data
+predict_rfn5 <- predict(model_rfn4, test_data, type = "response")
+df = confusionMatrix(predict_rfn5, test_data[["Class"]])
+df
+precision <- df$byClass['Precision']    
+precision
+recall <- df$byClass['Recall']
+recall
+specificity<- df$byClass['Specificity']
+specificity
+F_Score = (2 * precision * recall) / (precision + recall)
+paste("F-Score",F_Score)
+
+```
+
+```{r}
+
+
+#Predicting on Whole Test Dataset by taking 5 important features
+
+predict_rfn6 <- predict(model_rfn4, credit_card[-1], type = "response")
+df = confusionMatrix(predict_rfn6, credit_card[["Class"]])
+df$table
+df
+precision <- df$byClass['Precision']    
+precision
+
+recall <- df$byClass['Recall']
+recall
+```
+
